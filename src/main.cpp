@@ -28,6 +28,8 @@ const uint64_t RECHECK_US = 30ULL * 60 * 1000000;  // 30 min
 // Parâmetros para a descoberta de novas caixas de som
 const uint32_t JANELA_DESCOBERTA_MS = 15000;  // coleta candidatos por 15 s
 const int      RSSI_MINIMO          = -70;    // ignora sinais mais fracos que isso
+// LED Status
+const uint8_t PINO_LED = 2;  // GPIO9 -> LED verde
 // ==================================================
 
 
@@ -36,6 +38,16 @@ A2DPStream a2dp;                 // saida: Bluetooth A2DP (source)
 A2DPNoVolumeControl semAtenuacao; // nao atenua o PCM local; volume fica 100% na caixa
 File arquivo;
 StreamCopy copier(a2dp, arquivo); // PCM direto: arquivo -> A2DP
+
+// Enumeração dos estados possíveis do sistema/LED
+typedef enum {
+    ESTADO_INICIALIZANDO,
+    ESTADO_TENTANDO_CONECTAR,
+    ESTADO_ELEICAO,
+    ESTADO_CONECTADO
+} SistemaEstado_t;
+
+volatile SistemaEstado_t estadoAtual = ESTADO_INICIALIZANDO;
 
 // estado do volume da caixa
 int volumeAnterior = -1;
@@ -79,6 +91,54 @@ void taskVbat(void *pv) {
   }
 }
 
+void taskLED(void *pvParameters) {
+
+  pinMode(PINO_LED, OUTPUT);
+  digitalWrite(PINO_LED, LOW);
+
+  while (1) {
+  SistemaEstado_t estadoLocal = estadoAtual;
+
+  switch (estadoLocal) {
+      case ESTADO_INICIALIZANDO:
+          digitalWrite(PINO_LED, HIGH);
+          vTaskDelay(pdMS_TO_TICKS(100));
+          break;
+
+      case ESTADO_TENTANDO_CONECTAR:
+          digitalWrite(PINO_LED, HIGH);
+          vTaskDelay(pdMS_TO_TICKS(500));
+          if (estadoAtual != estadoLocal) break;
+          digitalWrite(PINO_LED, LOW);
+          vTaskDelay(pdMS_TO_TICKS(1000));
+          break;
+
+      case ESTADO_ELEICAO:
+          digitalWrite(PINO_LED, HIGH);
+          vTaskDelay(pdMS_TO_TICKS(100));
+          if (estadoAtual != estadoLocal) break;
+          digitalWrite(PINO_LED, LOW);
+          vTaskDelay(pdMS_TO_TICKS(100));
+          break;
+
+      case ESTADO_CONECTADO: {
+          digitalWrite(PINO_LED, HIGH);
+          vTaskDelay(pdMS_TO_TICKS(50));
+          digitalWrite(PINO_LED, LOW);
+
+          // Garante a saída "imediata" do loop caso mude de estado
+          for (int i = 0; i < 60; i++) { // 60 * 500ms = 30 segundos
+              vTaskDelay(pdMS_TO_TICKS(500));
+              if (estadoAtual != estadoLocal) {
+                  break; // Interrompe a espera de 30s imediatamente se o estado mudou
+              }
+          }
+          break;
+      }
+    }
+  }
+}
+
 void dormirSeBateriaBaixa() {
   if (!vbatPronta || vbatFiltrada > V_CORTE) return;
 
@@ -94,7 +154,11 @@ void dormirSeBateriaBaixa() {
 
 bool selecionarMaisForte(const char* nome, esp_bd_addr_t endereco, int rssi) {
   uint32_t agora = millis();
-  if (inicioDescoberta == 0) inicioDescoberta = agora;
+  if (inicioDescoberta == 0) {
+    estadoAtual = ESTADO_ELEICAO;
+    Serial.println(">>> Iniciando descoberta de caixas...");
+    inicioDescoberta = agora;
+  }
 
   if (rssi < RSSI_MINIMO) {
     Serial.printf("Descartando: %s (RSSI %d < %d)\n", nome, rssi, RSSI_MINIMO);
@@ -109,6 +173,8 @@ bool selecionarMaisForte(const char* nome, esp_bd_addr_t endereco, int rssi) {
     Serial.printf("Candidata: %s (RSSI %d) — melhor até agora\n", nome, rssi);
   }
   if (agora - inicioDescoberta < JANELA_DESCOBERTA_MS) return false;  // Não acabou o tempo ainda
+
+  estadoAtual = ESTADO_TENTANDO_CONECTAR;
 
   // fase 2: captura — janela encerrada, aceita o campeão quando reaparecer
   if (memcmp(endereco, melhorEndereco, ESP_BD_ADDR_LEN) == 0) {
@@ -126,8 +192,11 @@ bool selecionarMaisForte(const char* nome, esp_bd_addr_t endereco, int rssi) {
 void setup() {
   Serial.begin(115200);
 
-  // controle de bateria
+  estadoAtual = ESTADO_INICIALIZANDO;
+
+  // Inicia tasks
   xTaskCreatePinnedToCore(taskVbat, "vbat", 2048, NULL, 1, NULL, 0);
+  xTaskCreatePinnedToCore(taskLED, "led", 2048, NULL, 1, NULL, 0);
 
   // botao de reeleicao
   pinMode(PINO_BOTAO, INPUT_PULLUP);
@@ -161,6 +230,7 @@ void setup() {
 }
 
 void loop() {
+
   // --- botao de reeleicao: segurar 1 s ---
   if (digitalRead(PINO_BOTAO) == LOW) {
     if (botaoDesde == 0) botaoDesde = millis();
@@ -181,6 +251,8 @@ void loop() {
 
   // --- audio + estado de conexao ---
   if (a2dp.source().is_connected()) {
+    estadoAtual = ESTADO_CONECTADO;
+
     if (conectadoDesde == 0) {          // transicao: acabou de conectar
       conectadoDesde = millis();
       melhorRssi = -128;                // rearma a eleicao p/ proxima queda
@@ -200,6 +272,7 @@ void loop() {
       volumeAnterior = v;
     }
   } else {
+    estadoAtual = ESTADO_TENTANDO_CONECTAR;
     conectadoDesde = 0;                  // rearma p/ proxima conexao
     volumeAplicado = false;
     delay(20);
