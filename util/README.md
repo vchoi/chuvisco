@@ -1,4 +1,3 @@
- == Dados ==
-
-. loops de áudio
-. loopfix.py: crossfade do começo com o final do áudio para evitar "cliques"
+- white.pcm: white noise
+- brown.pcm: brown noise
+- loopfix.py: crossfade do começo com o final do áudio para evitar "cliques"
