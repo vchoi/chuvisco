@@ -1,4 +1,7 @@
 /*
+ * Chuvisco — tocador de áudio em loop via Bluetooth A2DP para ESP32.
+ * Copyright (C) 2026  Vitor Choi <https://github.com/vchoi/chuvisco>
+ * 
  * PCM em loop -> Caixa Bluetooth (A2DP Source)
  * Placa: DFRobot FireBeetle 2 ESP32-E (4MB)
  *
@@ -7,7 +10,22 @@
  *   ffmpeg -i entrada.wav -ar 44100 -ac 2 -f s16le -acodec pcm_s16le -ss 00:00:00 -to 00:00:10 loop.pcm
  * Fazer o crossfade (opcional) com util/loopfix.py
  * Enviar com "Upload Filesystem Image" (pio run -t uploadfs).
+ * 
+ * ---
+ * 
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
  *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
+ * 
  */
 
 #include <Arduino.h>
@@ -107,10 +125,10 @@ void taskLED(void *pvParameters) {
 
       case ESTADO_TENTANDO_CONECTAR:
           digitalWrite(PINO_LED, HIGH);
-          vTaskDelay(pdMS_TO_TICKS(500));
+          vTaskDelay(pdMS_TO_TICKS(100));
           if (estadoAtual != estadoLocal) break;
           digitalWrite(PINO_LED, LOW);
-          vTaskDelay(pdMS_TO_TICKS(1000));
+          vTaskDelay(pdMS_TO_TICKS(900));
           break;
 
       case ESTADO_ELEICAO:
